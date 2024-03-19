@@ -1,0 +1,138 @@
+﻿Program.Sub.Preflight.Start
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+Function.Intrinsic.UI.UsePixels ' Allows you to use Pixels instead of Twips throughout
+'Bryan Pham
+'05/04/2022
+'Customer: Warrior Rig
+'Scope: preventing receive quantity more than what they have ordered
+
+F.Intrinsic.Control.Try
+V.Local.sError.Declare
+v.Local.fToInv.Declare
+v.Local.fToIsp.Declare
+v.Local.sLine.Declare
+V.Local.iRowCnt.Declare
+V.Local.i.Declare
+V.Local.sReadRow.Declare
+V.Local.fQtyOpen.Declare
+v.Local.fTotalRec.Declare
+V.Local.sRR.Declare
+v.Local.sLineGrid.Declare
+v.Local.fQtyInspect.Declare
+v.Local.sPart.Declare
+v.Local.sLoc.Declare
+v.Local.sPO.Declare
+v.Local.sSQL.Declare
+v.Local.fQtyRec.Declare
+v.Local.fCheck.Declare
+v.Local.bDeposit.Declare
+
+'PO receive preSave hook
+f.Intrinsic.Control.If(v.Caller.Hook,=,"15030")
+	'PO line
+	F.Intrinsic.String.LPad(v.Passed.000070,"0",3,V.Local.sLine)
+	'qty to inventory
+	v.Local.fToInv.Set(v.Passed.000112)
+	'qty to inspection
+	v.Local.fToIsp.Set(v.Passed.000108)
+	'PO number
+	f.Intrinsic.String.LPad(v.Passed.000002,"0",7,v.Local.sPO)
+	
+	'Load the existing BDF
+	F.Intrinsic.BDF.Load("AUX001","AUX001")
+	
+	'Count the number of Rows in the BDF
+	F.Intrinsic.BDF.ReadRowCount("AUX001",V.Local.iRowCnt)
+	
+	'Subtract 1 from the number of rows... must be 0 indexed
+	F.Intrinsic.Math.Sub(V.Local.iRowCnt,1,V.Local.iRowCnt)
+	
+	F.Intrinsic.Control.For(V.Local.i,0,V.Local.iRowCnt,1)
+
+	'	'Read the current row of the BDF
+		F.Intrinsic.BDF.ReadRow("AUX001",V.Local.i,V.Local.sReadRow)
+	
+		'Split the row columns into an array
+		F.Intrinsic.String.Split(V.Local.sReadRow,"|~|",V.Local.sRR)
+	
+		'Retrieve Line number from grid - 
+		V.Local.sLineGrid.Set(V.Local.sRR(0))
+		F.Intrinsic.String.LPad(V.Local.sLineGrid,"0",3,V.Local.sLineGrid)
+	'check if PO line on the screen is matching with line in the grid
+		F.Intrinsic.Control.If(V.Local.sLine,=,V.Local.sLineGrid)
+			'Retrieve qty open from line - column 13 index 12
+			V.Local.fQtyOpen.Set(V.Local.sRR(12))
+			v.Local.fQtyInspect.Set(V.Local.sRR(11))
+			v.Local.sPart.Set(V.Local.sRR(1))
+			'they are using DEPOSIT for large PO, when receiving this, the quantity must be 1 or -1
+			f.Intrinsic.String.IsInString(v.Local.sPart,"DEPOSIT",True,v.Local.bDeposit)
+			f.Intrinsic.Control.If(v.Local.bDeposit,=,True)
+				f.Intrinsic.Control.If(v.Local.fToInv,<>,1, or, v.Local.fToInv,<>,-1)
+					f.Intrinsic.UI.Msgbox("This is deposit line, quantity received must be 1 or -1!","Error")
+					v.Passed.777777.Set(1)
+					f.Intrinsic.Control.End
+				f.Intrinsic.Control.EndIf
+			f.Intrinsic.Control.EndIf
+			
+			'un-receive (when enter a negative value on screen): cannot un-receive more than open qty
+			f.Intrinsic.Control.If(v.Local.fToInv,<,0)
+				F.Intrinsic.String.LPad(v.Passed.000070,"0",4,V.Local.sLine)
+				f.Intrinsic.String.Build("Select QTY_RECEIVED from V_PO_LINES where PURCHASE_ORDER = '{0}' and RECORD_NO = '{1}'",v.Local.sPO,v.Local.sLine,v.Local.sSQL)
+				f.ODBC.Connection!con.OpenCompanyConnection
+				f.ODBC.Connection!con.ExecuteAndReturn(v.Local.sSQL,v.Local.fQtyRec)
+				f.ODBC.Connection!con.Close
+				f.Intrinsic.Control.If(v.Ambient.ExecuteAndReturnEOF,=,False)
+					f.Intrinsic.Math.Add(v.Local.fQtyRec,v.Local.fToInv,v.Local.fCheck)
+					f.Intrinsic.Control.If(v.Local.fCheck,<>,0)
+						f.Intrinsic.UI.Msgbox("Quantity un-received to inspection cannot be greater than received quantity!","Error")
+						v.Passed.777777.Set(1)
+						f.Intrinsic.Control.End
+					f.Intrinsic.Control.EndIf
+				f.Intrinsic.Control.EndIf
+			f.Intrinsic.Control.EndIf
+			
+			'qty receive to inspection is greater than qty open
+			f.Intrinsic.Control.If(v.Local.fToIsp,>,v.Local.fQtyOpen)
+				f.Intrinsic.UI.Msgbox("Quantity received to inspection cannot be greater than open quantity!","Error")
+				v.Passed.777777.Set(1)
+			f.Intrinsic.Control.EndIf
+			
+			'qty receive to inventory is greater than inspected qty
+			f.Intrinsic.Control.If(v.Local.fQtyInspect,>,0)
+				f.Intrinsic.Control.If(v.Local.fToInv,>,v.Local.fQtyInspect)
+					f.Intrinsic.UI.Msgbox("Quantity received to inventory cannot be greater than quantity inspected!","Error")
+					v.Passed.777777.Set(1)
+				f.Intrinsic.Control.Else	
+					f.Intrinsic.Control.End
+				f.Intrinsic.Control.EndIf
+			f.Intrinsic.Control.EndIf
+			
+			'qty receive to inventory is greater than qty open
+			f.Intrinsic.Control.If(v.Local.fToInv,>,v.Local.fQtyOpen)
+				f.Intrinsic.UI.Msgbox("Quantity received to inventory cannot be greater than quantity open!","Error")
+				v.Passed.777777.Set(1)
+			f.Intrinsic.Control.EndIf
+			
+			'Exit the for loop since we found the line we are looking for
+			F.Intrinsic.Control.ExitFor(V.Local.i)
+	
+		F.Intrinsic.Control.EndIf
+
+	'Move to the Next row
+	F.Intrinsic.Control.Next(V.Local.i)
+f.Intrinsic.Control.EndIf
+
+f.Intrinsic.Control.End
+	F.Intrinsic.Control.Catch
+		F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}",V.Ambient.ScriptPath,V.Ambient.Newline,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Ambient.GABVersion,V.Local.sError)
+		F.Intrinsic.UI.Msgbox(V.Local.sError)
+		f.Intrinsic.Control.End
+	F.Intrinsic.Control.EndTry
+Program.Sub.Main.End
+
+Program.Sub.Comments.Start
+${$5$}$20.1.8207.17809$}$1
+${$6$}$bpham$}$20220714154912310$}$Di0riF4Q5RIv6jxva5zSWBaTvp+T0Dt6qPEbJO2QxCmrzxv21N/E4I2gaVXfDwt0ctTQBHuLupw=
+Program.Sub.Comments.End
